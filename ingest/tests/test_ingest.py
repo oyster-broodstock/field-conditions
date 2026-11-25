@@ -17,7 +17,7 @@ import archive  # noqa: E402
 import fetch  # noqa: E402
 import history  # noqa: E402
 from config import load_sites  # noqa: E402
-from sources import water  # noqa: E402
+from sources import common, nws, rain, water  # noqa: E402
 
 
 class Sites(unittest.TestCase):
@@ -126,6 +126,86 @@ class Baseline(unittest.TestCase):
         self.assertEqual(out["monthly"][0]["mean"], 5.0)
         self.assertEqual(out["monthly"][6]["max_hourly"], 32.0)
         self.assertIsNone(out["monthly"][3]["mean"])
+
+    def test_max_7day_mean_requires_consecutive_days(self):
+        # 7 days with a 2-day gap in the middle should not form a 7-day rolling mean
+        hourly = [
+            (f"2024-07-{day:02d}T{h:02d}:00", 25.0)
+            for day in (1, 2, 3, 6, 7, 8, 9)
+            for h in range(24)
+        ]
+        out = history.summarize(hourly, [2024])
+        self.assertIsNone(out["annual"][0]["max_7day_mean"])
+        # 2024 is a leap year: 7 / 366 = 0.02
+        self.assertEqual(out["annual"][0]["coverage"], round(7 / 366, 2))
+
+
+class DataIntegrity(unittest.TestCase):
+    def test_per_variable_latest_timestamp(self):
+        now = fake_api.NOW
+        old_t = common.iso(now - common.timedelta(days=2))
+        new_t = common.iso(now - common.timedelta(minutes=30))
+        rows = {
+            old_t: {"t": old_t, "water_temp_c": 20.0, "salinity_psu": 18.5},
+            new_t: {"t": new_t, "water_temp_c": 21.0},
+        }
+        st = water._finish(
+            {"lat": 37.0, "lon": -76.0},
+            {"id": "s1", "name": "Test", "lat": 37.0, "lon": -76.0},
+            "NOAA CO-OPS", "https://example.test", rows,
+        )
+        self.assertEqual(st["latest"]["t"], new_t)
+        self.assertEqual(st["latest_t"]["water_temp_c"], new_t)
+        self.assertEqual(st["latest_t"]["salinity_psu"], old_t)
+        doc = {"site": {"id": "x", "name": "X"}, "water": {"stations": [st]}}
+        s = fetch.summarize(doc)
+        self.assertEqual(s["water_temp_c"]["t"], new_t)
+        self.assertEqual(s["salinity_psu"]["t"], old_t)
+
+    def test_erddap_preserves_exact_timestamps_and_summarizes_off_hour(self):
+        now = fake_api.NOW.replace(minute=24, second=0, microsecond=0)
+        t1 = common.iso(now - common.timedelta(hours=1))
+        t2 = common.iso(now)
+        orig = water.get_json
+        try:
+            water.get_json = lambda url, **kw: {
+                "table": {
+                    "columnNames": ["time", "latitude", "longitude", "sea_water_temperature"],
+                    "rows": [[t1, 37.0, -76.0, 15.2], [t2, 37.0, -76.0, 15.8]],
+                }
+            }
+            st = water._erddap({"lat": 37.0, "lon": -76.0}, {"id": "offhour", "name": "Off-hour"})
+        finally:
+            water.get_json = orig
+        self.assertEqual([r["t"] for r in st["series"]], [t1, t2])
+        s = fetch.summarize({"site": {"id": "x", "name": "X"}, "water": {"stations": [st]}})
+        self.assertEqual(s["water_temp_c"]["series"], [[t1, 15.2], [t2, 15.8]])
+
+    def test_nws_unit_conversion_and_duration_parsing(self):
+        self.assertEqual(nws._convert(10.0, "wmoUnit:m_s-1", "speed", 1), 10.0)
+        self.assertEqual(nws._convert(18.0, "wmoUnit:km_h-1", "speed", 1), 5.0)
+        self.assertEqual(nws._convert(10.0, "wmoUnit:kn", "speed", 1), 5.1)
+        self.assertEqual(nws._convert(68.0, "wmoUnit:degF", "temp", 1), 20.0)
+        self.assertEqual(nws._convert(1.0, "wmoUnit:in", "precip", 1), 25.4)
+        _, hrs = common.parse_valid_time("2026-09-24T18:00:00+00:00/PT1H30M0S")
+        self.assertEqual(hrs, 2)
+        with self.assertRaises(ValueError):
+            common.parse_valid_time("2026-09-24T18:00:00+00:00/INVALID")
+
+    def test_rain_stale_data_does_not_count_as_last_24h(self):
+        old = common.utcnow() - common.timedelta(hours=40)
+        old_day = old.date().isoformat()
+        orig = rain.get_json
+        try:
+            rain.get_json = lambda url, **kw: (
+                {"data": [{"end_valid": common.iso(old), "precip_in": 1.0}]}
+                if f"valid={old_day}" in url else {"data": []}
+            )
+            out = rain.fetch({"lat": 37.0, "lon": -76.0})
+        finally:
+            rain.get_json = orig
+        self.assertEqual(out["totals_mm"]["h24"], 0.0)
+        self.assertEqual(out["totals_mm"]["h72"], 25.4)
 
 
 if __name__ == "__main__":

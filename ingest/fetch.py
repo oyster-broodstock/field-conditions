@@ -87,11 +87,16 @@ def summarize(doc: dict) -> dict:
     for key in ("water_temp_c", "salinity_psu", "do_mgl", "ph"):
         st = next((x for x in stations if x["latest"].get(key) is not None), None)
         if st:
-            s[key] = {"v": st["latest"][key], "t": st["latest"]["t"], "station": st["name"],
-                      "distance_km": st.get("distance_km")}
+            s[key] = {"v": st["latest"][key], "t": st.get("latest_t", {}).get(key, st["latest"]["t"]),
+                      "station": st["name"], "distance_km": st.get("distance_km")}
             if key in ("water_temp_c", "salinity_psu"):  # hourly series for the comparison chart
-                s[key]["series"] = [[row["t"], row[key]] for row in st["series"]
-                                    if row.get(key) is not None and row["t"][14:16] == "00"]
+                by_hour = {}
+                for row in st["series"]:
+                    if row.get(key) is not None:
+                        hr = row["t"][:13]
+                        if hr not in by_hour or row["t"][14:16] == "00":
+                            by_hour[hr] = [row["t"], row[key]]
+                s[key]["series"] = [by_hour[hr] for hr in sorted(by_hour)]
     obs = (doc.get("observations") or {}).get("stations", [])
     if obs and obs[0]["latest"].get("air_temp_c") is not None:
         s["air_temp_c"] = {"v": obs[0]["latest"]["air_temp_c"], "t": obs[0]["latest"]["t"],

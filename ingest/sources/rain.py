@@ -26,8 +26,7 @@ def fetch(site: dict) -> dict:
     def total(hours):
         if not hourly:
             return None
-        end = parse_iso(hourly[-1]["t"])
-        return round(sum(x["precip_mm"] for x in hourly if end - parse_iso(x["t"]) < timedelta(hours=hours)), 1)
+        return round(sum(x["precip_mm"] for x in hourly if now - parse_iso(x["t"]) <= timedelta(hours=hours)), 1)
 
     return {"source": "NCEP Stage IV precipitation analysis, via Iowa Environmental Mesonet",
             "source_url": "https://mesonet.agron.iastate.edu/rainfall/",

@@ -41,14 +41,17 @@ def num(v):
     return None if f != f else f  # NaN -> None
 
 
-_DUR = re.compile(r"P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?)?")
+_DUR = re.compile(r"P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?")
 
 
 def parse_valid_time(s: str) -> tuple[datetime, int]:
     """Parse an NWS validTime like '2026-09-24T18:00:00+00:00/PT6H' -> (start, hours)."""
     start, dur = s.split("/")
-    days, hours, minutes = (int(g) if g else 0 for g in _DUR.fullmatch(dur).groups())
-    return parse_iso(start), max(days * 24 + hours + (1 if minutes else 0), 1)
+    m = _DUR.fullmatch(dur)
+    if not m:
+        raise ValueError(f"Unsupported ISO-8601 duration: {dur!r}")
+    days, hours, minutes, seconds = (int(g) if g else 0 for g in m.groups())
+    return parse_iso(start), max(days * 24 + hours + (1 if (minutes or seconds) else 0), 1)
 
 
 def distance_km(lat1, lon1, lat2, lon2) -> float:

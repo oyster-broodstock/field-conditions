@@ -12,14 +12,44 @@ from sources.common import (distance_km, get_json, hour_floor, iso, parse_iso, p
 BASE = "https://api.weather.gov"
 GEO = "application/geo+json"
 KMH_TO_MS = 1 / 3.6
+KT_TO_MS = 0.514444
+MPH_TO_MS = 0.44704
 
-GRID_FIELDS = {  # gridpoint property -> (output key, converter, split over duration)
-    "temperature": ("air_temp_c", lambda v: r(v, 1), False),
-    "windSpeed": ("wind_ms", lambda v: r(v * KMH_TO_MS, 1), False),
-    "windGust": ("gust_ms", lambda v: r(v * KMH_TO_MS, 1), False),
-    "skyCover": ("sky_pct", lambda v: v, False),
-    "quantitativePrecipitation": ("qpf_mm", lambda v: r(v, 2), True),
+GRID_FIELDS = {  # gridpoint property -> (output key, unit kind, decimals, split over duration)
+    "temperature": ("air_temp_c", "temp", 1, False),
+    "windSpeed": ("wind_ms", "speed", 1, False),
+    "windGust": ("gust_ms", "speed", 1, False),
+    "skyCover": ("sky_pct", "pct", None, False),
+    "quantitativePrecipitation": ("qpf_mm", "precip", 2, True),
 }
+
+
+def _convert(value: float, uom: str | None, kind: str, decimals: int | None):
+    code = (uom or "").split(":")[-1]
+    if kind == "temp":
+        if code == "degF":
+            value = (value - 32) * 5 / 9
+        elif code == "K":
+            value = value - 273.15
+    elif kind == "speed":
+        if code == "m_s-1":
+            pass
+        elif code in ("kn", "kt"):
+            value = value * KT_TO_MS
+        elif code == "mi_h-1":
+            value = value * MPH_TO_MS
+        else:  # default wmoUnit:km_h-1
+            value = value * KMH_TO_MS
+    elif kind == "precip":
+        if code == "m":
+            value = value * 1000
+        elif code == "cm":
+            value = value * 10
+        elif code == "in":
+            value = value * 25.4
+    if decimals is None:
+        return value
+    return round(value) if decimals == 0 else r(value, decimals)
 
 
 def _point(site: dict) -> dict:
@@ -32,8 +62,10 @@ def forecast(site: dict) -> dict:
     start = hour_floor(utcnow())
     end = start + timedelta(days=7)
     hours: dict[str, dict] = {}
-    for prop, (key, conv, split) in GRID_FIELDS.items():
-        for item in props.get(prop, {}).get("values", []):
+    for prop, (key, kind, decimals, split) in GRID_FIELDS.items():
+        series = props.get(prop, {})
+        uom = series.get("uom")
+        for item in series.get("values", []):
             t0, n = parse_valid_time(item["validTime"])
             value = item["value"]
             if value is not None and split:
@@ -41,16 +73,19 @@ def forecast(site: dict) -> dict:
             for h in range(n):
                 t = t0 + timedelta(hours=h)
                 if start <= t < end:
-                    hours.setdefault(iso(t), {"t": iso(t)})[key] = None if value is None else conv(value)
+                    hours.setdefault(iso(t), {"t": iso(t)})[key] = (
+                        None if value is None else _convert(value, uom, kind, decimals)
+                    )
     return {"source": "NWS gridpoint forecast", "grid": grid_url.rsplit("/gridpoints/", 1)[-1],
             "source_url": f"https://forecast.weather.gov/MapClick.php?lat={site['lat']}&lon={site['lon']}",
             "updated": props.get("updateTime"), "hourly": [hours[k] for k in sorted(hours)],
             "units": {"air_temp_c": "°C", "wind_ms": "m/s", "gust_ms": "m/s", "qpf_mm": "mm/h", "sky_pct": "%"}}
 
 
-def _val(props, key, conv=lambda v: v):
-    v = (props.get(key) or {}).get("value")
-    return None if v is None else conv(v)
+def _val(props, key, kind: str, decimals: int | None):
+    item = props.get(key) or {}
+    v = item.get("value")
+    return None if v is None else _convert(v, item.get("unitCode"), kind, decimals)
 
 
 def observations(site: dict, max_stations: int = 2) -> dict:
@@ -76,10 +111,10 @@ def observations(site: dict, max_stations: int = 2) -> dict:
             p = o["properties"]
             t = iso(hour_floor(parse_iso(p["timestamp"])))
             rec = hourly.setdefault(t, {"t": t})
-            for key, val in (("air_temp_c", _val(p, "temperature", lambda v: r(v, 1))),
-                             ("wind_ms", _val(p, "windSpeed", lambda v: r(v * KMH_TO_MS, 1))),
-                             ("gust_ms", _val(p, "windGust", lambda v: r(v * KMH_TO_MS, 1))),
-                             ("rh_pct", _val(p, "relativeHumidity", lambda v: round(v)))):
+            for key, val in (("air_temp_c", _val(p, "temperature", "temp", 1)),
+                             ("wind_ms", _val(p, "windSpeed", "speed", 1)),
+                             ("gust_ms", _val(p, "windGust", "speed", 1)),
+                             ("rh_pct", _val(p, "relativeHumidity", "pct", 0))):
                 if val is not None and rec.get(key) is None:  # features arrive newest first
                     rec[key] = val
         series = [hourly[k] for k in sorted(hourly)]

@@ -91,7 +91,7 @@ if (!site) {
     const r = doc.rain, c = chartDiv();
     grid.append(card("Rain at the site", fresh(r),
       el("div", { class: "row" }, stat("24 h", `${num(r.totals_mm.h24)} mm`), stat("72 h", `${num(r.totals_mm.h72)} mm`), stat("7 days", `${num(r.totals_mm.h168)} mm`)),
-      c, el("p", { class: "small muted" }, "NCEP Stage IV radar and gauge analysis at the site coordinates (about 4 km grid).")));
+      c, el("p", { class: "small muted" }, `NCEP Stage IV radar and gauge analysis at the site coordinates (about 4 km grid)${r.through ? `; data through ${ago(r.through)}` : ""}.`)));
     charts.push(() => timeChart(c, [{ label: "Rain", data: r.hourly.map((x) => [x.t, x.precip_mm]) }], { tz, unit: "mm/h", bars: true }));
   }
 

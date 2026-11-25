@@ -17,15 +17,17 @@ The station is usually not in the site's own water body; its distance is in the 
 from __future__ import annotations
 
 import argparse
+import calendar
 import json
 import sys
 from collections import defaultdict
+from datetime import date
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "ingest"))
 
 from config import APP, ROOT, load_sites  # noqa: E402
-from sources.common import get_json, iso, num, utcnow  # noqa: E402
+from sources.common import distance_km, get_json, iso, num, utcnow  # noqa: E402
 
 THRESHOLDS_C = [20, 25, 28, 30, 32, 34]
 COOPS = "https://api.tidesandcurrents.noaa.gov/api/prod/datagetter"
@@ -51,7 +53,7 @@ def erddap_year(dataset: str, year: int) -> list[tuple[str, float]]:
     return [(t[:16], num(v)) for t, v in rows if num(v) is not None]
 
 
-def pct(sorted_vals: list[float], p: float) -> float:
+def pct(sorted_vals: list[float], p: float) -> float | None:
     if not sorted_vals:
         return None
     k = (len(sorted_vals) - 1) * p
@@ -84,8 +86,13 @@ def summarize(hourly: list[tuple[str, float]], years: list[int]) -> dict:
             annual.append({"year": y, "coverage": 0})
             continue
         tmax, vmax = max(hrs, key=lambda x: x[1])
-        week = [sum(m for _, (m, _) in dly[i:i + 7]) / 7 for i in range(max(len(dly) - 6, 0))]
-        annual.append({"year": y, "coverage": round(len(dly) / 365, 2),
+        week = [
+            sum(m for _, (m, _) in dly[i:i + 7]) / 7
+            for i in range(max(len(dly) - 6, 0))
+            if (date.fromisoformat(dly[i + 6][0]) - date.fromisoformat(dly[i][0])).days == 6
+        ]
+        days_in_year = 366 if calendar.isleap(y) else 365
+        annual.append({"year": y, "coverage": round(len(dly) / days_in_year, 2),
                        "max_hourly": r1(vmax), "max_date": tmax[:10],
                        "p99_hourly": r1(pct(sorted(v for _, v in hrs), 0.99)),
                        "max_7day_mean": r1(max(week)) if week else None,
@@ -117,9 +124,12 @@ def main() -> int:
             hourly = [row for y in years for row in fn(b["id"], y)]
             print(f"{b['provider']}:{b['id']}  {len(hourly)} hourly values")
             cache[key] = summarize(hourly, years)
-        name = next((s["name"] for s in site.get("coops", []) + site.get("erddap", []) if s["id"] == b["id"]), b["id"])
+        st_meta = next((s for s in site.get("coops", []) + site.get("erddap", []) if s["id"] == b["id"]), None)
+        station = {"provider": b["provider"], "id": b["id"], "name": st_meta["name"] if st_meta else b["id"]}
+        if st_meta and st_meta.get("lat") is not None and st_meta.get("lon") is not None:
+            station["distance_km"] = round(distance_km(site["lat"], site["lon"], st_meta["lat"], st_meta["lon"]), 1)
         doc = {"site_id": site["id"], "variable": "water_temp_c", "units": "°C",
-               "station": {"provider": b["provider"], "id": b["id"], "name": name},
+               "station": station,
                "years": [years[0], years[-1]], "thresholds_c": THRESHOLDS_C,
                "generated_at": iso(utcnow()), **cache[key]}
         (out / f"{site['id']}.json").write_text(json.dumps(doc, separators=(",", ":")))

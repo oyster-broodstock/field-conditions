@@ -53,16 +53,22 @@ def _finish(site: dict, meta: dict, provider: str, url: str, rows: dict[str, dic
     st = {"id": meta["id"], "name": meta["name"], "provider": provider, "url": url,
           "lat": meta.get("lat"), "lon": meta.get("lon"), "series": series,
           "variables": [k for k in KEYS if any(row.get(k) is not None for row in series)]}
-    if st["lat"] is not None:
+    if st["lat"] is not None and st["lon"] is not None:
         st["distance_km"] = round(distance_km(site["lat"], site["lon"], st["lat"], st["lon"]), 1)
     if not series:
         st["status"] = "no data"
     else:
         age = utcnow() - parse_iso(series[-1]["t"])
         st["status"] = "stale" if age > timedelta(days=MAX_AGE_DAYS) else "ok"
-        st["latest"] = {k: next((row[k] for row in reversed(series) if row.get(k) is not None), None)
-                        for k in KEYS}
-        st["latest"]["t"] = series[-1]["t"]
+        latest, latest_t = {}, {}
+        for k in KEYS:
+            hit = next((row for row in reversed(series) if row.get(k) is not None), None)
+            latest[k] = hit[k] if hit else None
+            if hit:
+                latest_t[k] = hit["t"]
+        latest["t"] = series[-1]["t"]
+        st["latest"] = latest
+        st["latest_t"] = latest_t
     return st
 
 
@@ -102,18 +108,30 @@ def _erddap(site: dict, s: dict) -> dict:
     pick = {key: next((cols[c] for c in names if c in cols), None)
             for key, names in ERDDAP_VARS.items() if key not in s.get("skip", [])}
     meta = {k: v for k, v in s.items() if k != "skip"}
-    rows: dict[str, dict] = {}
+    raw_rows: dict[str, dict] = {}
     dropped: dict[str, int] = {}
     for row in table["rows"]:
-        t = parse_iso(row[cols["time"]])
-        t = t.replace(minute=t.minute - t.minute % 30, second=0)
-        rec = rows.setdefault(iso(t), {"t": iso(t)})
+        ts = iso(parse_iso(row[cols["time"]]))
+        rec = raw_rows.setdefault(ts, {"t": ts})
         for key, i in pick.items():
             v = _clean(key, num(row[i]), dropped) if i is not None else None
             if v is not None:
                 rec[key] = v
-        if meta.get("lat") is None and "latitude" in cols and num(row[cols["latitude"]]) is not None:
+        if (meta.get("lat") is None and "latitude" in cols and "longitude" in cols
+                and num(row[cols["latitude"]]) is not None and num(row[cols["longitude"]]) is not None):
             meta["lat"], meta["lon"] = num(row[cols["latitude"]]), num(row[cols["longitude"]])
+    # Thin to at most one observation per 30-minute bucket without mutating timestamps.
+    rows: dict[str, dict] = {}
+    seen_buckets: set[str] = set()
+    for ts in sorted(raw_rows):
+        rec = raw_rows[ts]
+        if not any(rec.get(k) is not None for k in KEYS):
+            continue
+        t = parse_iso(ts)
+        bucket = iso(t.replace(minute=t.minute - t.minute % 30, second=0, microsecond=0))
+        if bucket not in seen_buckets:
+            seen_buckets.add(bucket)
+            rows[ts] = rec
     st = _finish(site, meta, "IOOS Sensors ERDDAP",
                  f"https://erddap.sensors.ioos.us/erddap/tabledap/{s['id']}.html", rows)
     if dropped:

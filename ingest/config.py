@@ -1,4 +1,6 @@
 """Shared settings. Sites and stations live in web/sites.json (also read by the web pages)."""
+from __future__ import annotations
+
 import json
 from pathlib import Path
 
