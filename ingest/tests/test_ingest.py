@@ -26,6 +26,7 @@ import archive  # noqa: E402
 import fetch  # noqa: E402
 import health  # noqa: E402
 import history  # noqa: E402
+import loggers  # noqa: E402
 from config import load_sites  # noqa: E402
 from sources import common, nws, rain, water  # noqa: E402
 
@@ -298,6 +299,83 @@ class Reliability(unittest.TestCase):
         report = health.format_report(feed_issues, station_issues, gen)
         self.assertIn("Garibaldi", report)
         self.assertIn("Old Buoy", report)
+
+
+class ProjectLoggers(unittest.TestCase):
+    def test_manchester_hobo_xlsx(self):
+        xlsx = Path(__file__).resolve().parent.parent.parent / "loggers" / "manchester" / "hobo_22105353_2026-08_2026-11.xlsx"
+        parsed = loggers.parse_logger_file(xlsx, "America/Los_Angeles")
+        self.assertEqual(parsed["dropped"], 0)
+        self.assertEqual(parsed["skipped_blank_ts"], 6)
+        self.assertEqual(parsed["details"]["product"], "MX2203")
+        self.assertEqual(parsed["details"]["serial"], "22105353")
+        summary = loggers.summarize_deployment(
+            "manchester", "manchester/hobo_22105353_2026-08_2026-11.xlsx", parsed, "America/Los_Angeles"
+        )
+        self.assertEqual(summary["n_samples"], 13679)
+        self.assertEqual(summary["interval_min"], 10.0)
+        self.assertEqual(summary["start_utc"], "2026-08-14T21:00:00Z")  # 14:00 PDT
+        self.assertEqual(summary["end_utc"], "2026-11-17T21:40:00Z")    # 13:40 PST
+        wt = summary["variables"]["water_temp_c"]
+        self.assertEqual(wt["stats"]["min"], 11.14)
+        self.assertEqual(wt["stats"]["max"], 21.38)
+        self.assertEqual(wt["stats"]["max_date"], "2026-08-31")
+        self.assertEqual(len(wt["daily"]), 96)
+
+    def test_hoboconnect_csv_and_generic_csv(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            hobo_csv = Path(tmp) / "hobo.csv"
+            hobo_csv.write_text(
+                '#,Date-Time (PDT/PST),"Temperature , °C"\n'
+                '1,2026-08-14 14:00:00,14.5\n'
+                '2,2026-08-14 14:10:00,14.7\n'
+                ',,14.7\n'
+                '#,Date-Time (PDT/PST),Host Connected\n'
+                '1,2026-08-14 13:22:00,Logged\n'
+                'Details,,,\n'
+                ',,Product,MX2203\n'
+                ',,Serial Number,999\n'
+            )
+            p = loggers.parse_logger_file(hobo_csv, "America/Los_Angeles")
+            self.assertEqual(len(p["records"]), 2)
+            self.assertEqual(p["details"]["product"], "MX2203")
+            self.assertEqual(p["details"]["serial"], "999")
+
+            gen_csv = Path(tmp) / "generic.csv"
+            gen_csv.write_text(
+                "datetime_utc,temp_f,salinity_psu\n"
+                "2026-09-01T12:00:00Z,68.0,28.5\n"
+                "2026-09-01T13:00:00Z,212.0,29.0\n"  # 100 C -> implausible, dropped
+            )
+            g = loggers.parse_logger_file(gen_csv, "America/New_York")
+            self.assertEqual(g["dropped"], 1)
+            temps = [v for _, var, v in g["records"] if var == "water_temp_c"]
+            sals = [v for _, var, v in g["records"] if var == "salinity_psu"]
+            self.assertEqual(temps, [20.0])
+            self.assertEqual(sals, [28.5, 29.0])
+
+    def test_logger_ingest_and_archive_idempotent(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ldir, out, arch = root / "loggers", root / "web_loggers", root / "archive"
+            (ldir / "manchester").mkdir(parents=True)
+            (ldir / "manchester" / "cage.csv").write_text(
+                "datetime_utc,water_temp_c\n2026-08-15T00:00:00Z,14.2\n2026-08-15T00:10:00Z,14.4\n"
+            )
+            counts = loggers.ingest_all(ldir, out, archive_dir=arch)
+            self.assertEqual(counts, {"manchester": 1})
+            doc = json.loads((out / "manchester.json").read_text())
+            self.assertEqual(doc["deployments"][0]["n_samples"], 2)
+
+            csv_path = arch / "manchester" / "2026.csv"
+            lines = csv_path.read_text().splitlines()
+            self.assertEqual(lines[0], ",".join(archive.HEADER))
+            self.assertEqual(len(lines), 3)
+            self.assertIn(",project_logger,cage,water_temp_c,", lines[1])
+
+            # Re-running does not duplicate archive rows
+            loggers.ingest_all(ldir, out, archive_dir=arch)
+            self.assertEqual(len(csv_path.read_text().splitlines()), 3)
 
 
 if __name__ == "__main__":

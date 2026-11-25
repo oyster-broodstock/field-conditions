@@ -118,6 +118,29 @@ export function climatologyChart(node, monthly, height = 200) {
   return plot;
 }
 
+// Daily mean line with shaded min–max range band: daily is [[YYYY-MM-DD, mean, min, max], ...].
+export function rangeBandChart(node, daily, opts = {}) {
+  if (!daily?.length) { node.replaceChildren(el("p", { class: "muted small" }, "No logger data.")); return null; }
+  const axis = { stroke: css("--muted"), grid: { stroke: css("--line") }, ticks: { stroke: css("--line") } };
+  const height = opts.height || 200;
+  const unit = opts.unit || "";
+  const x = daily.map((d) => Date.parse(`${d[0]}T12:00:00Z`) / 1000);
+  const fmtVal = (u, v) => (v == null ? "–" : `${v} ${unit}`.trim());
+  node.replaceChildren();
+  const plot = new uPlot({
+    width: node.clientWidth || 400, height, cursor: { y: false }, legend: { show: true },
+    scales: { x: { time: true } },
+    axes: [axis, { ...axis, size: 46, label: unit, labelSize: 16, font: "11px system-ui", labelFont: "11px system-ui" }],
+    series: [{ label: "Date", value: (u, v) => (v == null ? "–" : new Date(v * 1e3).toISOString().slice(0, 10)) },
+      { label: "Daily max", stroke: "transparent", points: { show: false }, value: fmtVal },
+      { label: "Daily min", stroke: "transparent", points: { show: false }, value: fmtVal },
+      { label: "Daily mean", stroke: css("--accent"), width: 1.8, points: { show: false }, value: fmtVal }],
+    bands: [{ series: [1, 2], fill: css("--accent") + "33" }],
+  }, [x, daily.map((d) => d[3]), daily.map((d) => d[2]), daily.map((d) => d[1])], node);
+  bindResize(node, plot, height);
+  return plot;
+}
+
 // Years with at least half the days present; partial years are shown but not used for headline numbers.
 export const goodYears = (b) => (b?.annual || []).filter((a) => a.coverage >= 0.5);
 export function baselineHeadline(b) {

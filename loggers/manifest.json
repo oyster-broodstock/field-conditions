@@ -1,0 +1,6 @@
+{
+  "manchester/hobo_22105353_2026-08_2026-11.xlsx": {
+    "label": "Oyster cage logger (HOBO MX2203 #22105353)",
+    "notes": "10-minute temperature record from an Onset HOBO MX2203 logger deployed in an oyster cage at Manchester. The single 21.38 °C reading on 2026-08-31 14:30 PDT is surrounded by ~14.8 °C readings and likely reflects brief air exposure during a cage check."
+  }
+}

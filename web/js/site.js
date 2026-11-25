@@ -1,5 +1,5 @@
 // One site: every public source, each labeled with its station and distance.
-import { MONTHS, ago, archiveUrl, baselineHeadline, climatologyChart, el, header, load, loadSites, num, stat, timeChart } from "./common.js";
+import { MONTHS, ago, archiveUrl, baselineHeadline, climatologyChart, el, header, load, loadSites, num, rangeBandChart, stat, timeChart } from "./common.js";
 
 header("");
 const id = new URLSearchParams(location.search).get("id");
@@ -10,7 +10,9 @@ const site = id ? sites.find((s) => s.id === id) : null;
 if (!site) {
   main.replaceChildren(el("p", {}, "Unknown site. ", el("a", { href: "index.html" }, "Back to the map")));
 } else {
-  const [doc, base] = await Promise.all([load(`data/${site.id}.json`), load(`baseline/${site.id}.json`)]);
+  const [doc, base, loggers] = await Promise.all([
+    load(`data/${site.id}.json`), load(`baseline/${site.id}.json`), load(`loggers/${site.id}.json`),
+  ]);
   document.title = `${site.name} · Oyster Broodstock CAP`;
   const tz = site.tz;
   const card = (title, badge, ...kids) => el("section", { class: "card" }, el("h2", {}, title, badge || ""), ...kids);
@@ -64,6 +66,28 @@ if (!site) {
     charts.push(() => climatologyChart(c, base.monthly));
   }
 
+  // ---- historic project loggers (on-site sensors such as HOBO cage loggers)
+  const VAR_LABEL = Object.fromEntries(VARS.map(([k, title]) => [k, title]));
+  for (const dep of loggers?.deployments || []) {
+    for (const [key, series] of Object.entries(dep.variables || {})) {
+      const c = chartDiv(), s = series.stats, unit = series.unit || "";
+      const dec = key === "ph" ? 2 : 1;
+      const startDay = series.daily?.[0]?.[0] || dep.start_utc?.slice(0, 10) || "";
+      const endDay = series.daily?.[series.daily.length - 1]?.[0] || dep.end_utc?.slice(0, 10) || "";
+      const span = startDay && endDay ? `${startDay} – ${endDay}` : "historic";
+      const meta = `${dep.label} · ${dep.n_samples.toLocaleString()} readings${dep.interval_min ? ` (${dep.interval_min}-min)` : ""}. Solid line: daily mean; shaded band: daily min–max.`;
+      grid.append(card(`Project logger · ${VAR_LABEL[key] || key}`, el("span", { class: "badge" }, span),
+        el("div", { class: "row" },
+          stat("Mean", `${num(s.mean, dec)} ${unit}`),
+          stat("Min", `${num(s.min, dec)} ${unit}`),
+          stat("99th pct.", `${num(s.p99, dec)} ${unit}`),
+          stat(`Max (${s.max_date || "–"})`, `${num(s.max, dec)} ${unit}`)),
+        c,
+        el("p", { class: "small muted" }, meta, dep.notes ? ` ${dep.notes}` : "")));
+      charts.push(() => rangeBandChart(c, series.daily, { unit }));
+    }
+  }
+
   // ---- tide
   if (doc?.tides) {
     const t = doc.tides, c = chartDiv();
@@ -108,6 +132,7 @@ if (!site) {
 
   main.append(el("p", { class: "footer" }, "Compiled from public sources for research coordination. Stations are often outside the site's own water body; check the distance on each card. ",
     el("a", { href: `data/${site.id}.json` }, "Latest JSON"), " · ",
+    loggers?.deployments?.length ? [el("a", { href: `loggers/${site.id}.json` }, "Logger JSON"), " · "] : null,
     el("a", { href: archiveUrl(site.id), target: "_blank", rel: "noopener" }, "CSV archive"), " · ",
     el("a", { href: "about.html" }, "Sources and freshness")));
   charts.forEach((draw) => draw());
