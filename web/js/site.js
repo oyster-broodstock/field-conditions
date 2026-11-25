@@ -44,7 +44,9 @@ if (!site) {
     else c.remove();
   }
   const dead = stations.filter((s) => s.status !== "ok");
+  const notes = stations.flatMap((s) => (s.notes || []).map((n) => `${s.name}: ${n}`));
   if (dead.length) main.append(el("p", { class: "small muted" }, "Not reporting: ", dead.map((s) => `${s.name} (${s.status})`).join(", ")));
+  if (notes.length) main.append(el("p", { class: "small muted" }, notes.join(". ")));
 
   // ---- historical baseline
   if (base) {

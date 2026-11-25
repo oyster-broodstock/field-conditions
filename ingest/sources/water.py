@@ -29,6 +29,23 @@ ERDDAP_VARS = {
     "ph": ["sea_water_ph_reported_on_total_scale"],
 }
 KEYS = list(ERDDAP_VARS)
+# Values outside these ranges are dropped and counted in the station's notes. Checked Nov 2026:
+# some upstream feeds are mis-scaled (CBIBS 44058 salinity arrives 1000x too large).
+PLAUSIBLE = {"water_temp_c": (-2, 40), "salinity_psu": (0, 42), "do_mgl": (0, 25), "ph": (6, 9.5)}
+
+
+def _clean(key: str, v, dropped: dict):
+    if v is None:
+        return None
+    lo, hi = PLAUSIBLE[key]
+    if lo <= v <= hi:
+        return r(v)
+    dropped[key] = dropped.get(key, 0) + 1
+    return None
+
+
+def _drop_notes(dropped: dict) -> list[str]:
+    return [f"{n} {k} values outside the plausible range were dropped" for k, n in dropped.items()]
 
 
 def _finish(site: dict, meta: dict, provider: str, url: str, rows: dict[str, dict]) -> dict:
@@ -51,7 +68,7 @@ def _finish(site: dict, meta: dict, provider: str, url: str, rows: dict[str, dic
 
 def _coops(site: dict, s: dict) -> dict:
     rows: dict[str, dict] = {}
-    errors = []
+    errors, dropped = [], {}
     for product, key, field in (("water_temperature", "water_temp_c", "v"), ("salinity", "salinity_psu", "s")):
         if product not in s.get("products", []):
             continue
@@ -65,11 +82,11 @@ def _coops(site: dict, s: dict) -> dict:
             t = datetime.strptime(d["t"], "%Y-%m-%d %H:%M").replace(tzinfo=timezone.utc)
             if t.minute % 30:  # 6-minute data -> 30-minute
                 continue
-            rows.setdefault(iso(t), {"t": iso(t)})[key] = r(num(d.get(field)))
+            rows.setdefault(iso(t), {"t": iso(t)})[key] = _clean(key, num(d.get(field)), dropped)
     st = _finish(site, s, "NOAA CO-OPS",
                  f"https://tidesandcurrents.noaa.gov/stationhome.html?id={s['id']}", rows)
-    if errors:
-        st["notes"] = errors
+    if errors or dropped:
+        st["notes"] = errors + _drop_notes(dropped)
     return st
 
 
@@ -82,21 +99,26 @@ def _erddap(site: dict, s: dict) -> dict:
             raise
         table = {"columnNames": [], "rows": []}
     cols = {name: i for i, name in enumerate(table["columnNames"])}
-    pick = {key: next((cols[c] for c in names if c in cols), None) for key, names in ERDDAP_VARS.items()}
-    meta = dict(s)
+    pick = {key: next((cols[c] for c in names if c in cols), None)
+            for key, names in ERDDAP_VARS.items() if key not in s.get("skip", [])}
+    meta = {k: v for k, v in s.items() if k != "skip"}
     rows: dict[str, dict] = {}
+    dropped: dict[str, int] = {}
     for row in table["rows"]:
         t = parse_iso(row[cols["time"]])
         t = t.replace(minute=t.minute - t.minute % 30, second=0)
         rec = rows.setdefault(iso(t), {"t": iso(t)})
         for key, i in pick.items():
-            v = num(row[i]) if i is not None else None
+            v = _clean(key, num(row[i]), dropped) if i is not None else None
             if v is not None:
-                rec[key] = r(v)
+                rec[key] = v
         if meta.get("lat") is None and "latitude" in cols and num(row[cols["latitude"]]) is not None:
             meta["lat"], meta["lon"] = num(row[cols["latitude"]]), num(row[cols["longitude"]])
-    return _finish(site, meta, "IOOS Sensors ERDDAP",
-                   f"https://erddap.sensors.ioos.us/erddap/tabledap/{s['id']}.html", rows)
+    st = _finish(site, meta, "IOOS Sensors ERDDAP",
+                 f"https://erddap.sensors.ioos.us/erddap/tabledap/{s['id']}.html", rows)
+    if dropped:
+        st["notes"] = _drop_notes(dropped)
+    return st
 
 
 def fetch(site: dict) -> dict:

@@ -20,7 +20,7 @@
      "erddap": [{"id": "sfc-buoy-44058-stingray-point", "lat": 37.567, "lon": -76.257, "name": "CBIBS Stingray Point buoy (44058)"}],
      "usgs": [],
      "baseline": {"provider": "coops", "id": "8632200"},
-     "gaps": "No public gauge in the creek. Nearest observations are 26 km (Kiptopeke) and 31 km (mid-bay buoy); neither represents a shallow tidal creek."},
+     "gaps": "No public gauge in the creek. Nearest observations are 26 km (Kiptopeke) and 31 km (mid-bay buoy); neither represents a shallow tidal creek. Salinity from the Stingray Point buoy arrives 1000 times too large upstream and is dropped until that is fixed."},
 
     {"id": "topsail", "name": "Topsail Sound, NC", "kind": "field", "coast": "Atlantic", "node": "VIMS",
      "species": "Crassostrea virginica", "lat": 34.43, "lon": -77.57, "tz": "America/New_York",
@@ -39,10 +39,10 @@
      "coops": [{"id": "8775792", "name": "Packery Channel", "lat": 27.6333, "lon": -97.2367, "products": ["water_temperature"]},
                {"id": "8775283", "name": "Enbridge, Ingleside", "lat": 27.8186, "lon": -97.209, "products": ["water_temperature", "salinity"]},
                {"id": "8775296", "name": "USS Lexington, Corpus Christi Bay", "lat": 27.8149, "lon": -97.3892, "products": ["water_temperature"]}],
-     "erddap": [{"id": "ism-gcoos-cbi_074", "lat": 27.8516, "lon": -97.482, "name": "TAMU-CC CBI SALT03, Nueces Bay"}],
+     "erddap": [{"id": "ism-gcoos-cbi_074", "lat": 27.8516, "lon": -97.482, "skip": ["do_mgl"], "name": "TAMU-CC CBI SALT03, Nueces Bay"}],
      "usgs": [{"id": "08211500", "name": "Nueces River at Calallen"}],
      "baseline": {"provider": "coops", "id": "8775792"},
-     "gaps": "TWDB coastal datasondes are not yet wired in."},
+     "gaps": "TWDB coastal datasondes are not yet wired in. Dissolved oxygen from the Nueces Bay station is left out because the feed is mis-scaled upstream (values near 0.007 labeled mg/L)."},
 
     {"id": "tx2", "name": "Matagorda Bay, TX (second Texas site, to be confirmed)", "kind": "field", "coast": "Gulf", "node": "Texas A&M-CC",
      "species": "Crassostrea virginica", "lat": 28.55, "lon": -96.45, "tz": "America/Chicago",

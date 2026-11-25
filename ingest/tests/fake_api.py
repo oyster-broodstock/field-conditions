@@ -44,7 +44,8 @@ def fake_get_json(url: str, timeout: int = 40, accept: str = "application/json")
         temp_col = "sea_surface_temperature" if "cbi_" in url else "sea_water_temperature"
         t0 = NOW - timedelta(hours=168)
         rows = [[(t0 + timedelta(minutes=30 * i)).strftime("%Y-%m-%dT%H:%M:%SZ"), 34.1, -77.8,
-                 _wave(i, 14 + seed, 1, 25), _wave(i, 30, 2, 50), None if i % 9 == 0 else 7.5]
+                 _wave(i, 14 + seed, 1, 25), 19847 if "44058" in url else _wave(i, 30, 2, 50),
+                 None if i % 9 == 0 else 7.5]
                 for i in range(336)]
         return {"table": {"columnNames": ["time", "latitude", "longitude", temp_col,
                                           "sea_water_practical_salinity",

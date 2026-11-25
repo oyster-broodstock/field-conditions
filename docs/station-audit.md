@@ -10,9 +10,9 @@ position is refined.
 | Site | Tide predictions | Water temperature | Salinity | River discharge | Baseline record (hourly water temp) |
 |---|---|---|---|---|---|
 | York River, VA | Gloucester Point 8637624 (0.1 km) | Yorktown USCG 8637689 (3 km) | Yorktown USCG 8637689 | Pamunkey 01673000, Mattaponi 01674500 | Yorktown, 2016–2025, 10 full years |
-| Hungars Creek, VA | Cape Charles Harbor 8632366 (16 km, bay side) | Kiptopeke 8632200 (26 km); CBIBS Stingray Point 44058 (31 km) | Kiptopeke; Stingray Point | none gauged | Kiptopeke, 10 years (2023 at 63%) |
+| Hungars Creek, VA | Cape Charles Harbor 8632366 (16 km, bay side) | Kiptopeke 8632200 (26 km); CBIBS Stingray Point 44058 (31 km) | Kiptopeke (Stingray Point salinity is mis-scaled upstream and dropped) | none gauged | Kiptopeke, 10 years (2023 at 63%) |
 | Topsail Sound, NC | Ocean City Beach pier 8657419 (7 km, ocean side) | Wrightsville Beach 8658163 (31 km); UNCW hatchery dock; CORMP ILM2 | UNCW hatchery dock; CORMP ILM2 | NE Cape Fear 02108000 (regional proxy) | Wrightsville Beach, 10 years |
-| Corpus Christi Bay, TX | Corpus Christi NAS 8775421 (2 km) | Packery Channel 8775792 (11 km); Ingleside 8775283 (13 km); USS Lexington 8775296 (15 km) | Ingleside 8775283; CBI SALT03 Nueces Bay (also DO) | Nueces at Calallen 08211500 | Packery Channel, 10 years |
+| Corpus Christi Bay, TX | Corpus Christi NAS 8775421 (2 km) | Packery Channel 8775792 (11 km); Ingleside 8775283 (13 km); USS Lexington 8775296 (15 km) | Ingleside 8775283; CBI SALT03 Nueces Bay (its DO feed is mis-scaled and skipped) | Nueces at Calallen 08211500 | Packery Channel, 10 years |
 | Matagorda Bay, TX (to be confirmed) | Port O'Connor 8773701 (13 km) | Port O'Connor (13 km); Port Lavaca 8773259 (19 km) | none found | Colorado 08162500, Lavaca 08164000 | Port O'Connor, 8 usable years (2016–2017 partial) |
 | Netarts Bay, OR | Netarts 9437262 (1 km) | Garibaldi 9437540 (15 km, Tillamook Bay), via ERDDAP | none found | Wilson 14301500 (regional proxy) | Garibaldi, 4 usable years; many gaps |
 | Willapa Bay, WA | Nahcotta 9440747 (8 km) | Toke Point 9440910 (18 km) | none found | Willapa 12013500, Naselle 12010000 | Toke Point, 10 years |
@@ -52,3 +52,12 @@ CoastWatch SST and chlorophyll.
 
 NERRS web services require a registered IP address, which GitHub-hosted runners cannot
 provide; use CDMO bulk downloads for history and an ERDDAP mirror for real time.
+
+## Live check, 2026-11-25
+
+- Garibaldi water temperature was null for the whole previous week, so Netarts Bay currently
+  has no live public water temperature at all.
+- CBIBS Stingray Point (44058) salinity arrives as about 19847 where about 19.8 is expected.
+  The ingest drops values outside a plausible range and says so on the site page.
+- TAMU-CC CBI SALT03 (Nueces Bay) dissolved oxygen reads about 0.007 while labeled mg/L.
+  That variable is skipped for that station in `web/sites.json`.

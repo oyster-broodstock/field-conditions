@@ -51,9 +51,14 @@ class Ingest(unittest.TestCase):
         self.assertEqual(len(st["series"]), 336)  # 7 days at 30 minutes
         # ERDDAP dataset that names its temperature column differently, and takes lat/lon from the data
         cbi = next(s for s in self.docs["corpus"][0]["water"]["stations"] if s["id"] == "ism-gcoos-cbi_074")
-        self.assertIn("water_temp_c", cbi["variables"])
-        self.assertIn("do_mgl", cbi["variables"])
-        self.assertIsNotNone(cbi["lat"])
+        self.assertEqual(cbi["variables"], ["water_temp_c", "salinity_psu"])  # do_mgl is skipped in sites.json
+        ilm2 = next(s for s in self.docs["topsail"][0]["water"]["stations"] if s["id"] == "org_cormp_ilm2")
+        self.assertIn("do_mgl", ilm2["variables"])
+
+    def test_implausible_values_are_dropped(self):
+        buoy = next(s for s in self.docs["hungars"][0]["water"]["stations"] if "44058" in s["id"])
+        self.assertEqual(buoy["variables"], ["water_temp_c", "do_mgl"])
+        self.assertIn("salinity_psu values outside the plausible range", buoy["notes"][0])
 
     def test_water_gaps_are_reported(self):
         site = {"lat": 0, "lon": 0, "coops": [{"id": "0000000", "name": "Dead", "lat": 0, "lon": 0.1,
