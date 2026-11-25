@@ -1,5 +1,5 @@
 // Where the data comes from and how fresh each feed is, per site.
-import { ago, el, header, load, loadSites } from "./common.js";
+import { ago, archiveUrl, el, header, load, loadSites } from "./common.js";
 
 header("about.html");
 const main = document.getElementById("main");
@@ -21,7 +21,7 @@ main.replaceChildren(
       el("thead", {}, el("tr", {}, el("th", {}, "Site"), SOURCES.map(([, t]) => el("th", {}, t)), el("th", {}, "Download"))),
       el("tbody", {}, sites.map((s) => el("tr", {}, el("td", {}, el("a", { href: `site.html?id=${s.id}` }, s.name)),
         SOURCES.map(([k]) => el("td", {}, badge(meta?.sites?.[s.id]?.[k]))),
-        el("td", {}, el("a", { href: `data/${s.id}.json` }, "JSON")))))))),
+        el("td", { class: "small" }, el("a", { href: `data/${s.id}.json` }, "JSON"), " · ", link(archiveUrl(s.id), "CSV")))))))),
   el("section", { class: "card" }, el("h2", {}, "Stations used"),
     el("div", { class: "scroll" }, el("table", {},
       el("thead", {}, el("tr", {}, el("th", {}, "Site"), el("th", {}, "Tide predictions"), el("th", {}, "Water"), el("th", {}, "River discharge"))),

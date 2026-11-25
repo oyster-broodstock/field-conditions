@@ -12,6 +12,9 @@ if (!summary) {
   const seen = {};
   const style = (s) => { const i = (seen[s.coast] = (seen[s.coast] ?? -1) + 1); return { color: colors[s.coast], dash: dashes[i % dashes.length] }; };
   const tChart = el("div", { class: "chart" }), sChart = el("div", { class: "chart" });
+  const hatchToggle = el("input", { type: "checkbox" });
+  const toggleLabel = el("label", { class: "small muted", style: "display:inline-flex;align-items:center;gap:6px;text-transform:none;letter-spacing:0;cursor:pointer" },
+    hatchToggle, "Include hatcheries");
   const cell = (x, d = 1, unit = "") => el("td", { class: "n", title: x ? `${x.station}${x.distance_km != null ? `, ${x.distance_km} km` : ""}` : "" }, x ? `${num(x.v, d)}${unit}` : "–");
   main.replaceChildren(
     el("section", { class: "card" }, el("h2", {}, "Latest readings", el("span", { class: "badge" }, ago(summary.generated_at))),
@@ -24,10 +27,19 @@ if (!summary) {
           el("td", { class: "n" }, s.rain_72h_mm == null ? "–" : num(s.rain_72h_mm)), cell(s.discharge_cms, 0),
           el("td", { class: "small muted" }, s.water_temp_c ? `${s.water_temp_c.station} (${num(s.water_temp_c.distance_km, 0)} km)` : "none")))))),
       el("p", { class: "small muted" }, "Each value comes from the nearest public station that reports it, which can be tens of kilometres from the site. Open markers are hatcheries.")),
-    el("section", { class: "card" }, el("h2", {}, "Water temperature, last 7 days"), tChart,
-      el("p", { class: "small muted" }, "Colour is the coast (blue Atlantic, orange Gulf, teal Pacific); line style separates sites within a coast. Times in UTC.")),
+    el("section", { class: "card" }, el("h2", {}, "Water temperature, last 7 days", toggleLabel), tChart,
+      el("p", { class: "small muted" }, "Field sites shown by default. Colour is the coast (blue Atlantic, orange Gulf, teal Pacific); line style separates sites within a coast. Times in UTC.")),
     el("section", { class: "card" }, el("h2", {}, "Salinity, last 7 days"), sChart));
-  const lines = (key) => { for (const k in seen) delete seen[k]; return sites.filter((s) => s[key]?.series?.length && s.kind === "field").map((s) => ({ label: s.name, data: s[key].series, ...style(s) })); };
-  timeChart(tChart, lines("water_temp_c"), { unit: "°C", height: 320, legend: true });
-  timeChart(sChart, lines("salinity_psu"), { unit: "PSU", height: 260, legend: true });
+  const lines = (key) => {
+    for (const k in seen) delete seen[k];
+    return sites
+      .filter((s) => s[key]?.series?.length && (hatchToggle.checked || s.kind === "field"))
+      .map((s) => ({ label: s.name, data: s[key].series, ...style(s) }));
+  };
+  const draw = () => {
+    timeChart(tChart, lines("water_temp_c"), { unit: "°C", height: 320, legend: true });
+    timeChart(sChart, lines("salinity_psu"), { unit: "PSU", height: 260, legend: true });
+  };
+  hatchToggle.addEventListener("change", draw);
+  draw();
 }

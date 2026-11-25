@@ -18,6 +18,19 @@ export function ago(s) {
 export const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 export const COAST_COLOR = () => ({ Atlantic: css("--atlantic"), Gulf: css("--gulf"), Pacific: css("--pacific") });
 export const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+export const REPO_URL = "https://github.com/oyster-broodstock/field-conditions";
+export const archiveUrl = (siteId) => `${REPO_URL}/tree/data/archive/${encodeURIComponent(siteId)}`;
+
+function bindResize(node, plot, height) {
+  node._ro?.disconnect();
+  if (typeof ResizeObserver === "undefined") return;
+  const ro = new ResizeObserver(() => {
+    const w = node.clientWidth;
+    if (w > 0 && w !== plot.width) plot.setSize({ width: w, height });
+  });
+  ro.observe(node);
+  node._ro = ro;
+}
 
 export function el(tag, attrs = {}, ...kids) {
   const e = document.createElement(tag);
@@ -59,9 +72,10 @@ export function timeChart(node, series, opts = {}) {
   const palette = [css("--accent"), css("--accent-2"), css("--atlantic"), css("--good"), css("--bad")];
   const axis = { stroke: css("--muted"), grid: { stroke: css("--line") }, ticks: { stroke: css("--line") } };
   const now = Date.now() / 1000;
+  const height = opts.height || 180;
   node.replaceChildren();
-  return new uPlot({
-    width: node.clientWidth || 400, height: opts.height || 180,
+  const plot = new uPlot({
+    width: node.clientWidth || 400, height,
     tzDate: (ts) => uPlot.tzDate(new Date(ts * 1e3), opts.tz || "UTC"),
     cursor: { y: false },
     legend: { show: series.length > 1 || !!opts.legend },
@@ -79,6 +93,8 @@ export function timeChart(node, series, opts = {}) {
       ctx.moveTo(x, bbox.top); ctx.lineTo(x, bbox.top + bbox.height); ctx.stroke(); ctx.restore();
     }] },
   }, [times, ...cols], node);
+  bindResize(node, plot, height);
+  return plot;
 }
 
 // Monthly climatology: p05–p95 band of daily means, mean line, highest hourly value.
@@ -86,7 +102,7 @@ export function climatologyChart(node, monthly, height = 200) {
   const axis = { stroke: css("--muted"), grid: { stroke: css("--line") }, ticks: { stroke: css("--line") } };
   const x = monthly.map((m) => m.month);
   node.replaceChildren();
-  return new uPlot({
+  const plot = new uPlot({
     width: node.clientWidth || 400, height, cursor: { y: false }, legend: { show: false },
     scales: { x: { time: false, range: [0.5, 12.5] } },
     axes: [{ ...axis, values: (u, v) => v.map((m) => MONTHS[m - 1] || ""), splits: () => x },
@@ -98,6 +114,8 @@ export function climatologyChart(node, monthly, height = 200) {
       { label: "Highest hourly", stroke: css("--accent-2"), width: 0, points: { show: true, size: 6, fill: css("--accent-2") } }],
     bands: [{ series: [1, 2], fill: css("--accent") + "33" }],
   }, [x, monthly.map((m) => m.p95), monthly.map((m) => m.p05), monthly.map((m) => m.mean), monthly.map((m) => m.max_hourly)], node);
+  bindResize(node, plot, height);
+  return plot;
 }
 
 // Years with at least half the days present; partial years are shown but not used for headline numbers.

@@ -15,6 +15,7 @@ site keeps showing the last good data (its age is visible in meta.json and on th
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import json
 import sys
 import time
@@ -24,7 +25,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from config import load_sites  # noqa: E402
+from config import USER_AGENT, load_sites  # noqa: E402
 from sources import nws, rain, rivers, tides, water  # noqa: E402
 from sources.common import iso, utcnow  # noqa: E402
 
@@ -42,12 +43,20 @@ SITE_FIELDS = ("id", "name", "kind", "coast", "node", "species", "lat", "lon", "
 def load_previous(out: Path, fallback_url: str | None, name: str):
     p = out / f"{name}.json"
     if p.exists():
-        return json.loads(p.read_text())
+        try:
+            return json.loads(p.read_text())
+        except Exception as e:
+            print(f"[warn] could not read {p}: {e}")
     if fallback_url:
         try:
-            with urllib.request.urlopen(f"{fallback_url.rstrip('/')}/{name}.json", timeout=20) as resp:
+            req = urllib.request.Request(
+                f"{fallback_url.rstrip('/')}/{name}.json",
+                headers={"User-Agent": USER_AGENT, "Accept": "application/json"},
+            )
+            with urllib.request.urlopen(req, timeout=20) as resp:
                 return json.load(resp)
-        except Exception:
+        except Exception as e:
+            print(f"[warn] fallback fetch failed for {name}.json: {e}")
             return None
     return None
 
@@ -116,6 +125,7 @@ def main() -> int:
     ap.add_argument("--fallback-url", default=None)
     ap.add_argument("--only", nargs="*", help="fetch only these sources")
     ap.add_argument("--only-sites", nargs="*", help="fetch only these site ids")
+    ap.add_argument("--workers", type=int, default=4, help="concurrent site fetches (default: 4)")
     args = ap.parse_args()
 
     out = Path(args.out)
@@ -125,15 +135,24 @@ def main() -> int:
     summaries = {s["id"]: s for s in (load_previous(out, args.fallback_url, "summary") or {}).get("sites", [])}
 
     sites = load_sites()
-    for site in sites:
-        if args.only_sites and site["id"] not in args.only_sites:
-            continue
+    selected = [s for s in sites if not args.only_sites or s["id"] in args.only_sites]
+
+    def run_one(site: dict) -> tuple[str, dict, dict]:
         previous = load_previous(out, args.fallback_url, site["id"])
         doc, status = fetch_site(site, previous, args.only)
         doc["generated_at"] = iso(utcnow())
         (out / f"{site['id']}.json").write_text(json.dumps(doc, separators=(",", ":")))
-        statuses[site["id"]] = {**statuses.get(site["id"], {}), **status}
-        summaries[site["id"]] = summarize(doc)
+        return site["id"], doc, status
+
+    if args.workers > 1 and len(selected) > 1:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=args.workers) as pool:
+            results = list(pool.map(run_one, selected))
+    else:
+        results = [run_one(site) for site in selected]
+
+    for sid, doc, status in results:
+        statuses[sid] = {**statuses.get(sid, {}), **status}
+        summaries[sid] = summarize(doc)
 
     now = iso(utcnow())
     order = [s["id"] for s in sites]

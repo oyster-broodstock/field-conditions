@@ -28,10 +28,13 @@ for (const s of sites) {
   const dot = el("div", { title: s.name, style:
     `width:16px;height:16px;border-radius:50%;cursor:pointer;border:3px solid ${colors[s.coast]};` +
     `background:${s.kind === "field" ? colors[s.coast] : "#fff"};box-shadow:0 0 0 2px rgba(255,255,255,.9)` });
+  const popup = el("div", {},
+    el("b", {}, s.name), el("br"),
+    el("span", { class: "muted" }, `${s.kind === "field" ? "Field site" : "Hatchery"} · ${s.node}`), el("br"),
+    reading(s), el("br"),
+    el("a", { href: `site.html?id=${encodeURIComponent(s.id)}` }, "Open site page"));
   new maplibregl.Marker({ element: dot }).setLngLat([s.lon, s.lat])
-    .setPopup(new maplibregl.Popup({ offset: 12 }).setHTML(
-      `<b>${s.name}</b><br><span class="muted">${s.kind === "field" ? "Field site" : "Hatchery"} · ${s.node}</span><br>` +
-      `${reading(s)}<br><a href="site.html?id=${s.id}">Open site page</a>`))
+    .setPopup(new maplibregl.Popup({ offset: 12 }).setDOMContent(popup))
     .addTo(map);
 }
 

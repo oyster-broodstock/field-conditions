@@ -1,24 +1,67 @@
-"""Shared helpers: HTTP (with a per-run cache), time parsing, distance."""
+"""Shared helpers: HTTP (with retries and a thread-safe per-run cache), time parsing, distance."""
 from __future__ import annotations
 
 import json
 import math
 import re
+import threading
+import time
 import urllib.request
 from datetime import datetime, timedelta, timezone
+from urllib.error import HTTPError, URLError
 
 from config import USER_AGENT
 
 _cache: dict[str, object] = {}
+_cache_lock = threading.Lock()
+_inflight: dict[str, threading.Event] = {}
+RETRY_STATUS = {429, 500, 502, 503, 504}
 
 
-def get_json(url: str, timeout: int = 40, accept: str = "application/json"):
-    """GET and parse JSON. Cached for the run, so sites sharing a station fetch it once."""
-    if url not in _cache:
+def _retry_delay(err: Exception, attempt: int, backoff: float) -> float:
+    if isinstance(err, HTTPError) and err.headers:
+        ra = err.headers.get("Retry-After")
+        if ra and ra.isdigit():
+            return min(float(ra), 15.0)
+    return backoff * (2 ** attempt)
+
+
+def get_json(url: str, timeout: int = 40, accept: str = "application/json",
+             retries: int = 3, backoff: float = 1.5):
+    """GET and parse JSON with retries and a thread-safe per-run cache."""
+    while True:
+        with _cache_lock:
+            if url in _cache:
+                return _cache[url]
+            event = _inflight.get(url)
+            if event is None:
+                event = threading.Event()
+                _inflight[url] = event
+                owner = True
+                break
+        event.wait()
+
+    try:
         req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": accept})
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            _cache[url] = json.load(resp)
-    return _cache[url]
+        for attempt in range(retries):
+            try:
+                with urllib.request.urlopen(req, timeout=timeout) as resp:
+                    data = json.load(resp)
+                with _cache_lock:
+                    _cache[url] = data
+                return data
+            except HTTPError as e:
+                if e.code not in RETRY_STATUS or attempt == retries - 1:
+                    raise
+                time.sleep(_retry_delay(e, attempt, backoff))
+            except (URLError, TimeoutError, OSError):
+                if attempt == retries - 1:
+                    raise
+                time.sleep(backoff * (2 ** attempt))
+    finally:
+        with _cache_lock:
+            _inflight.pop(url, None)
+            event.set()
 
 
 def utcnow() -> datetime:

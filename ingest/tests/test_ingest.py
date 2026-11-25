@@ -1,9 +1,18 @@
 """Offline tests: python3 -m unittest discover ingest/tests"""
+import concurrent.futures
+import io
 import json
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
+from urllib.error import HTTPError
+
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:  # Python 3.8
+    ZoneInfo = None
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -15,6 +24,7 @@ fake_api.install()
 
 import archive  # noqa: E402
 import fetch  # noqa: E402
+import health  # noqa: E402
 import history  # noqa: E402
 from config import load_sites  # noqa: E402
 from sources import common, nws, rain, water  # noqa: E402
@@ -28,7 +38,19 @@ class Sites(unittest.TestCase):
         for s in sites:
             for k in ("name", "coast", "node", "lat", "lon", "tz", "tide", "kind"):
                 self.assertIn(k, s, s["id"])
+            self.assertIn(s["kind"], ("field", "hatchery"), s["id"])
+            self.assertIn(s["coast"], ("Atlantic", "Gulf", "Pacific"), s["id"])
+            self.assertTrue(-90 <= s["lat"] <= 90 and -180 <= s["lon"] <= 180, s["id"])
+            if ZoneInfo is not None:
+                ZoneInfo(s["tz"])
+            self.assertTrue(s["tide"].get("id") and s["tide"].get("name"), s["id"])
             self.assertTrue(s.get("coops") or s.get("erddap"), f"{s['id']} has no water station")
+            for st in s.get("coops", []) + s.get("erddap", []):
+                if st.get("lat") is not None or st.get("lon") is not None:
+                    self.assertTrue(-90 <= st["lat"] <= 90 and -180 <= st["lon"] <= 180, st["id"])
+            if "baseline" in s:
+                self.assertIn(s["baseline"].get("provider"), ("coops", "erddap"), s["id"])
+                self.assertTrue(s["baseline"].get("id"), s["id"])
 
 
 class Ingest(unittest.TestCase):
@@ -206,6 +228,76 @@ class DataIntegrity(unittest.TestCase):
             rain.get_json = orig
         self.assertEqual(out["totals_mm"]["h24"], 0.0)
         self.assertEqual(out["totals_mm"]["h72"], 25.4)
+
+
+class Reliability(unittest.TestCase):
+    def test_get_json_retries_transient_and_deduplicates_concurrent(self):
+        # Restore real get_json temporarily to test retry & thread-safe cache logic
+        import importlib
+        real_mod = importlib.reload(common)
+        real_get_json = real_mod.get_json
+        fake_api.install()  # re-install fake for other tests
+
+        calls = {"n": 0}
+
+        def fake_urlopen(req, timeout=40):
+            calls["n"] += 1
+            if "retry" in req.full_url and calls["n"] < 3:
+                raise HTTPError(req.full_url, 503, "unavailable", {}, None)
+            if "notfound" in req.full_url:
+                raise HTTPError(req.full_url, 404, "not found", {}, None)
+            return io.BytesIO(b'{"ok": true}')
+
+        with mock.patch("urllib.request.urlopen", side_effect=fake_urlopen), \
+             mock.patch("time.sleep"):
+            real_mod._cache.clear()
+            self.assertEqual(real_get_json("https://example.test/retry", retries=3, backoff=0.01), {"ok": True})
+            self.assertEqual(calls["n"], 3)
+
+            calls["n"] = 0
+            with self.assertRaises(HTTPError):
+                real_get_json("https://example.test/notfound", retries=3, backoff=0.01)
+            self.assertEqual(calls["n"], 1)  # 404 is not retried
+
+            calls["n"] = 0
+            with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+                res = list(pool.map(lambda _: real_get_json("https://example.test/shared"), range(4)))
+            self.assertEqual(res, [{"ok": True}] * 4)
+            self.assertEqual(calls["n"], 1)  # deduplicated across threads
+
+    def test_health_check_flags_persistent_failures_and_stale_stations(self):
+        now = common.parse_iso("2026-11-25T12:00:00Z")
+        sites = [{"id": "york"}, {"id": "netarts"}]
+        files = {
+            "meta": {
+                "generated_at": "2026-11-25T11:00:00Z",
+                "sites": {
+                    "york": {
+                        "water": {"ok": False, "fetched_at": "2026-11-25T08:00:00Z", "error": "transient"},
+                        "rain": {"ok": False, "fetched_at": "2026-11-22T00:00:00Z", "error": "timeout"},
+                    },
+                    "netarts": {"water": {"ok": True, "fetched_at": "2026-11-25T11:00:00Z"}},
+                },
+            },
+            "york": {"water": {"stations": [{"id": "8637689", "name": "Yorktown", "status": "ok"}]}},
+            "netarts": {
+                "water": {
+                    "stations": [
+                        {"id": "9437540", "name": "Garibaldi", "status": "no data"},
+                        {"id": "old1", "name": "Old Buoy", "status": "stale",
+                         "latest": {"t": "2026-11-10T00:00:00Z"}},
+                    ]
+                }
+            },
+        }
+        feed_issues, station_issues, gen = health.check_health(sites, files.get, now=now)
+        self.assertEqual(gen, "2026-11-25T11:00:00Z")
+        self.assertEqual(len(feed_issues), 1)
+        self.assertIn("york / rain", feed_issues[0])
+        self.assertEqual(len(station_issues), 2)
+        report = health.format_report(feed_issues, station_issues, gen)
+        self.assertIn("Garibaldi", report)
+        self.assertIn("Old Buoy", report)
 
 
 if __name__ == "__main__":

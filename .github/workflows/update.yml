@@ -5,10 +5,13 @@ on:
     - cron: "7 * * * *"   # hourly; GitHub may delay scheduled runs by several minutes
   push:
     branches: [main]
+    paths-ignore:
+      - "README.md"
+      - "PLAN.md"
+      - "docs/**"
   workflow_dispatch:
 
 permissions:
-  contents: write   # the archive step pushes to the data branch
   pages: write
   id-token: write
 
@@ -36,29 +39,6 @@ jobs:
       - name: Fetch public data
         # Standard library only. Falls back to the published file for any source that fails.
         run: python ingest/fetch.py --out web/data --fallback-url "${{ steps.pages.outputs.base_url }}/data"
-
-      - name: Archive observations (data branch)
-        # Permanent copy of every reading; the site keeps only 7 days. Never blocks the deploy.
-        if: github.ref == 'refs/heads/main'
-        continue-on-error: true
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          if git fetch --depth 1 origin data; then
-            git worktree add -B data ../archive FETCH_HEAD
-          else
-            git worktree add --detach ../archive
-            git -C ../archive checkout --orphan data
-            git -C ../archive rm -rfq .
-          fi
-          python ingest/archive.py web/data ../archive/archive
-          git -C ../archive add -A
-          if git -C ../archive diff --cached --quiet; then
-            echo "No new observations."
-          else
-            git -C ../archive commit -qm "Observations to $(date -u +%Y-%m-%dT%H:%MZ)"
-            git -C ../archive push origin data
-          fi
 
       - uses: actions/upload-pages-artifact@v3
         with:

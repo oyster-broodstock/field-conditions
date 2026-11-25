@@ -1,15 +1,16 @@
 // One site: every public source, each labeled with its station and distance.
-import { MONTHS, ago, baselineHeadline, climatologyChart, el, header, load, loadSites, num, stat, timeChart } from "./common.js";
+import { MONTHS, ago, archiveUrl, baselineHeadline, climatologyChart, el, header, load, loadSites, num, stat, timeChart } from "./common.js";
 
 header("");
 const id = new URLSearchParams(location.search).get("id");
 const main = document.getElementById("main");
-const [sites, doc, base] = await Promise.all([loadSites(), load(`data/${id}.json`), load(`baseline/${id}.json`)]);
-const site = sites.find((s) => s.id === id);
+const sites = await loadSites();
+const site = id ? sites.find((s) => s.id === id) : null;
 
 if (!site) {
   main.replaceChildren(el("p", {}, "Unknown site. ", el("a", { href: "index.html" }, "Back to the map")));
 } else {
+  const [doc, base] = await Promise.all([load(`data/${site.id}.json`), load(`baseline/${site.id}.json`)]);
   document.title = `${site.name} · Oyster Broodstock CAP`;
   const tz = site.tz;
   const card = (title, badge, ...kids) => el("section", { class: "card" }, el("h2", {}, title, badge || ""), ...kids);
@@ -45,8 +46,8 @@ if (!site) {
   }
   const dead = stations.filter((s) => s.status !== "ok");
   const notes = stations.flatMap((s) => (s.notes || []).map((n) => `${s.name}: ${n}`));
-  if (dead.length) main.append(el("p", { class: "small muted" }, "Not reporting: ", dead.map((s) => `${s.name} (${s.status})`).join(", ")));
-  if (notes.length) main.append(el("p", { class: "small muted" }, notes.join(". ")));
+  if (dead.length) grid.append(el("p", { class: "small muted", style: "grid-column:1 / -1;margin:0" }, "Not reporting: ", dead.map((s) => `${s.name} (${s.status})`).join(", ")));
+  if (notes.length) grid.append(el("p", { class: "small muted", style: "grid-column:1 / -1;margin:0" }, notes.join(". ")));
 
   // ---- historical baseline
   if (base) {
@@ -106,6 +107,8 @@ if (!site) {
   }
 
   main.append(el("p", { class: "footer" }, "Compiled from public sources for research coordination. Stations are often outside the site's own water body; check the distance on each card. ",
+    el("a", { href: `data/${site.id}.json` }, "Latest JSON"), " · ",
+    el("a", { href: archiveUrl(site.id), target: "_blank", rel: "noopener" }, "CSV archive"), " · ",
     el("a", { href: "about.html" }, "Sources and freshness")));
   charts.forEach((draw) => draw());
 }

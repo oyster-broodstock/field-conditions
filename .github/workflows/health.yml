@@ -1,0 +1,46 @@
+name: Feed health check
+
+# Weekly check against the published JSON files. Opens or updates a single GitHub Issue
+# labeled "feed-health" if a feed has been failing for >48 h or a water station is stale >7 d,
+# and closes it automatically once feeds recover.
+
+on:
+  schedule:
+    - cron: "0 14 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  health:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Check published feed health
+        run: |
+          BASE_URL="https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/data"
+          python ingest/health.py --base-url "$BASE_URL" --out health.md
+
+      - name: Update feed-health issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          REPO="${{ github.repository }}"
+          ISSUE=$(gh issue list -R "$REPO" --label feed-health --state open --json number --jq '.[0].number // empty')
+          if [ -s health.md ]; then
+            gh label create feed-health -R "$REPO" --color "d93f0b" --description "Automated feed health alerts" --force
+            if [ -n "$ISSUE" ]; then
+              gh issue edit "$ISSUE" -R "$REPO" --body-file health.md
+            else
+              gh issue create -R "$REPO" --title "Feed health: failing feeds or stale stations" --label feed-health --body-file health.md
+            fi
+          elif [ -n "$ISSUE" ]; then
+            gh issue close "$ISSUE" -R "$REPO" --comment "All feeds and water stations are healthy again."
+          fi
