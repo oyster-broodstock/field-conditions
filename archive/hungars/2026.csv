@@ -1556,3 +1556,4 @@ datetime_utc,site_id,source,station_id,variable,value,unit
 2026-11-25T14:30:00Z,hungars,ioos_erddap,sfc-buoy-44058-stingray-point,water_temp_c,13.1,degC
 2026-11-25T15:00:00Z,hungars,coops,8632200,salinity_psu,29.02,PSU
 2026-11-25T15:00:00Z,hungars,coops,8632200,water_temp_c,12.4,degC
+2026-11-18T15:24:00Z,hungars,ioos_erddap,sfc-buoy-44058-stingray-point,water_temp_c,13.43,degC
